@@ -131,34 +131,39 @@ def test_simple_call_endpoint():
         return False
 
 def test_document_parsing():
-    """Test the document parsing endpoint"""
-    print_section("📄 DOCUMENT PARSING TEST")
+    """Test the document parsing endpoint with URL"""
+    print_section("📄 DOCUMENT PARSING TEST (URL)")
     
-    # Check if test file exists
-    test_file = "testing_doc/invalid_fw4.pdf"
-    if not os.path.exists(test_file):
-        print(f"❌ Test file '{test_file}' not found. Please ensure it exists.")
-        return False
+    # Test with a sample PDF URL
+    test_url = "https://www.w3.org/WAI/ER/tests/xhtml/testfiles/resources/pdf/dummy.pdf"
     
     try:
-        with open(test_file, 'rb') as f:
-            files = {'file': (test_file, f, 'application/pdf')}
-            headers = {"X-API-Key": API_KEY}
-            
-            print(f"📤 Uploading and parsing: {test_file}")
-            response = requests.post(
-                f"{BASE_URL}/parse-document",
-                files=files,
-                headers=headers
-            )
+        request_data = {
+            "file_url": test_url,
+            "filename": "test_sample.pdf"
+        }
+        
+        print(f"📤 Testing with URL: {test_url}")
+        response = requests.post(
+            f"{BASE_URL}/parse-document",
+            json=request_data,
+            headers={
+                "X-API-Key": API_KEY,
+                "Content-Type": "application/json"
+            }
+        )
         
         if response.status_code == 200:
             result = response.json()
             print("✅ Document parsing successful!")
             
             print("\n📊 Document Analysis Results:")
-            print(f"   • File: {result.get('filename')}")
-            print(f"   • Size: {result.get('file_size_bytes', 0):,} bytes")
+            if 'download_info' in result:
+                download_info = result['download_info']
+                print(f"   • Source URL: {download_info.get('source_url')}")
+                print(f"   • Downloaded File: {download_info.get('downloaded_filename')}")
+                print(f"   • File Size: {download_info.get('file_size_bytes', 0):,} bytes")
+            
             print(f"   • File Type: {result.get('file_type')}")
             print(f"   • Extraction Method: {result.get('extraction_method')}")
             
@@ -176,7 +181,7 @@ def test_document_parsing():
             
             # Save detailed results
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            results_file = f'parsing_results_{timestamp}.json'
+            results_file = f'comprehensive_parsing_results_{timestamp}.json'
             with open(results_file, 'w') as f:
                 json.dump(result, f, indent=2)
             print(f"\n💾 Detailed results saved to: {results_file}")

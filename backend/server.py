@@ -5,6 +5,11 @@ from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel, Field
 from typing import Optional, Literal, Annotated, List
 import os
+import aiohttp
+import tempfile
+import uuid
+from urllib.parse import urlparse
+from pathlib import Path
 from dotenv import load_dotenv
 from twilio_speech import TwilioSpeechService
 import uvicorn
@@ -52,6 +57,101 @@ def verify_api_key_header(x_api_key: Annotated[str | None, Header()] = None) -> 
         )
     return x_api_key
 
+# Helper functions for file handling
+async def download_file_from_url(url: str, filename: Optional[str] = None) -> tuple[bytes, str]:
+    """
+    Download a file from a URL and return the content and filename.
+    
+    Args:
+        url: The URL to download from
+        filename: Optional filename override
+        
+    Returns:
+        Tuple of (file_content, filename)
+    """
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.get(url) as response:
+                if response.status != 200:
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"Failed to download file from URL. Status code: {response.status}"
+                    )
+                
+                # Get file content
+                file_content = await response.read()
+                
+                if len(file_content) == 0:
+                    raise HTTPException(
+                        status_code=400,
+                        detail="Downloaded file is empty"
+                    )
+                
+                # Determine filename
+                if filename:
+                    final_filename = filename
+                else:
+                    # Try to get filename from URL or Content-Disposition header
+                    content_disposition = response.headers.get('Content-Disposition', '')
+                    if 'filename=' in content_disposition:
+                        final_filename = content_disposition.split('filename=')[1].strip('"\'')
+                    else:
+                        # Extract from URL path
+                        parsed_url = urlparse(url)
+                        path_filename = Path(parsed_url.path).name
+                        final_filename = path_filename if path_filename else f"document_{uuid.uuid4().hex[:8]}.pdf"
+                
+                return file_content, final_filename
+                
+    except aiohttp.ClientError as e:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Network error while downloading file: {str(e)}"
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error downloading file: {str(e)}"
+        )
+
+def save_temp_file(file_content: bytes, filename: str) -> str:
+    """
+    Save file content to a temporary file in the file_uploads directory.
+    
+    Args:
+        file_content: The file content bytes
+        filename: The filename
+        
+    Returns:
+        Path to the saved temporary file
+    """
+    # Create uploads directory if it doesn't exist
+    uploads_dir = Path("file_uploads")
+    uploads_dir.mkdir(exist_ok=True)
+    
+    # Generate unique filename to avoid conflicts
+    unique_filename = f"{uuid.uuid4().hex[:8]}_{filename}"
+    temp_file_path = uploads_dir / unique_filename
+    
+    # Save file
+    with open(temp_file_path, 'wb') as f:
+        f.write(file_content)
+    
+    return str(temp_file_path)
+
+def cleanup_temp_file(file_path: str):
+    """
+    Clean up a temporary file.
+    
+    Args:
+        file_path: Path to the file to delete
+    """
+    try:
+        if os.path.exists(file_path):
+            os.remove(file_path)
+    except Exception as e:
+        print(f"Warning: Could not clean up temp file {file_path}: {e}")
+
 # Initialize FastAPI app
 app = FastAPI(
     title="DocAlert API",
@@ -87,6 +187,9 @@ class CallResponse(BaseModel):
     message: str
 
 # Document parsing models
+class DocumentUrlRequest(BaseModel):
+    file_url: str = Field(..., description="URL to the document file to parse")
+    filename: Optional[str] = Field(None, description="Optional filename override")
 class DocumentParseRequest(BaseModel):
     template_type: Optional[str] = Field(None, description="Document template type (employment_form, tax_form, address_verification)")
     auto_detect: bool = Field(True, description="Auto-detect document fields if no template specified")
@@ -233,21 +336,21 @@ async def make_call(call_request: CallRequest, api_key: str = Depends(verify_api
 # Document parsing endpoints
 @app.post("/parse-document")
 async def parse_document(
-    file: UploadFile = File(...),
+    request: DocumentUrlRequest,
     api_key: str = Depends(verify_api_key_header)
 ):
     """
-    Parse a document with comprehensive structure analysis optimized for LLM processing.
+    Parse a document from a URL with comprehensive structure analysis optimized for LLM processing.
     
-    This endpoint provides:
-    - Page-by-page content breakdown
-    - Content block classification
-    - Pattern detection for forms, fields, signatures
-    - Text confidence scoring
-    - Processing instructions for LLMs
+    This endpoint:
+    1. Downloads the file from the provided URL
+    2. Saves it temporarily to file_uploads directory
+    3. Parses it with the enhanced parser
+    4. Deletes the temporary file
+    5. Returns comprehensive document structure
     
     Args:
-        file: The document file to parse (PDF or image)
+        request: DocumentUrlRequest containing file_url and optional filename
         
     Returns:
         Comprehensive document structure with LLM processing guidance
@@ -258,27 +361,32 @@ async def parse_document(
             detail="Document parsing not available. Install pypdf to enable this feature."
         )
     
-    # Validate file type
-    allowed_extensions = {'.pdf', '.png', '.jpg', '.jpeg', '.tiff', '.bmp'}
-    file_extension = os.path.splitext(file.filename)[1].lower()
-    
-    if file_extension not in allowed_extensions:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Unsupported file type: {file_extension}. Supported: {', '.join(allowed_extensions)}"
-        )
+    temp_file_path = None
     
     try:
-        # Read file content
-        file_content = await file.read()
+        # Download file from URL
+        print(f"📥 Downloading file from: {request.file_url}")
+        file_content, filename = await download_file_from_url(request.file_url, request.filename)
         
-        if len(file_content) == 0:
-            raise HTTPException(status_code=400, detail="Empty file uploaded")
+        # Validate file type
+        allowed_extensions = {'.pdf', '.png', '.jpg', '.jpeg', '.tiff', '.bmp'}
+        file_extension = os.path.splitext(filename)[1].lower()
+        
+        if file_extension not in allowed_extensions:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Unsupported file type: {file_extension}. Supported: {', '.join(allowed_extensions)}"
+            )
+        
+        # Save to temporary file
+        temp_file_path = save_temp_file(file_content, filename)
+        print(f"💾 Saved temporary file: {temp_file_path}")
         
         # Parse document with enhanced parser for LLM
+        print(f"🔍 Parsing document: {filename}")
         result = await document_parser.parse_document_for_llm(
             file_content=file_content,
-            filename=file.filename
+            filename=filename
         )
         
         if not result["success"]:
@@ -287,6 +395,14 @@ async def parse_document(
                 detail=f"Document parsing failed: {result.get('error', 'Unknown error')}"
             )
         
+        # Add download info to result
+        result["download_info"] = {
+            "source_url": request.file_url,
+            "downloaded_filename": filename,
+            "file_size_bytes": len(file_content)
+        }
+        
+        print(f"✅ Successfully parsed document: {filename}")
         return result
         
     except HTTPException:
@@ -296,6 +412,11 @@ async def parse_document(
             status_code=500,
             detail=f"Error processing document: {str(e)}"
         )
+    finally:
+        # Always clean up temporary file
+        if temp_file_path:
+            cleanup_temp_file(temp_file_path)
+            print(f"🗑️  Cleaned up temporary file: {temp_file_path}")
 
 @app.get("/document-templates")
 async def get_document_templates(api_key: str = Depends(verify_api_key_header)):
