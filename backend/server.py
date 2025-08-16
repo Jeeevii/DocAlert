@@ -1,9 +1,9 @@
-from fastapi import FastAPI, HTTPException, Depends, Header
+from fastapi import FastAPI, HTTPException, Depends, Header, File, UploadFile, Form
 from fastapi.responses import Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel, Field
-from typing import Optional, Literal, Annotated
+from typing import Optional, Literal, Annotated, List
 import os
 from dotenv import load_dotenv
 from twilio_speech import TwilioSpeechService
@@ -11,6 +11,15 @@ from twilio_speech import TwilioSpeechService
 # Advanced features available but commented out
 # from twilio_sms import TwilioSMSService  
 # from twilio_voicemail import TwilioVoicemailService
+
+# Document parsing service
+try:
+    from enhanced_document_parser import EnhancedDocumentParser
+    document_parser = EnhancedDocumentParser()
+    print("✅ Enhanced document parser initialized successfully")
+except ImportError as e:
+    print(f"❌ Enhanced document parser not available: {e}")
+    document_parser = None
 
 # Load environment variables
 load_dotenv()
@@ -76,6 +85,43 @@ class CallResponse(BaseModel):
     call_sid: Optional[str] = None
     message: str
 
+# Document parsing models
+class DocumentParseRequest(BaseModel):
+    template_type: Optional[str] = Field(None, description="Document template type (employment_form, tax_form, address_verification)")
+    auto_detect: bool = Field(True, description="Auto-detect document fields if no template specified")
+
+class DocumentField(BaseModel):
+    page: int
+    title: str
+    question: str
+    answer: str
+    optional: bool
+    required: bool
+    field_type: str
+    format_expectation: str
+    confidence: float = 0.0
+    validation_status: str = "PENDING"
+    validation_errors: List[str] = []
+
+class ValidationSummary(BaseModel):
+    total_fields: int
+    passed: int
+    failed: int
+    warnings: int
+    missing_required: int
+    validation_percentage: float
+    ready_for_processing: bool
+
+class DocumentParseResponse(BaseModel):
+    success: bool
+    filename: Optional[str] = None
+    template_type: Optional[str] = None
+    page_count: Optional[int] = None
+    fields: List[DocumentField] = []
+    validation_summary: Optional[ValidationSummary] = None
+    raw_text: Optional[str] = None
+    error: Optional[str] = None
+
 # Advanced models available but commented out for future use
 """
 class SMSRequest(BaseModel):
@@ -120,11 +166,16 @@ async def health_check():
         "service": "DocAlert API",
         "version": "1.0.0",
         "twilio_configured": twilio_service is not None,
+        "document_parsing_configured": document_parser is not None,
         "cors_enabled": True,
         "endpoints": {
             "voice_calls": "/make-call",
             "test_call": "/test-call",
-            "webhook": "/twiml"
+            "webhook": "/twiml",
+            "document_parsing": "/parse-document",
+            "document_templates": "/document-templates",
+            "field_validation": "/validate-document-field",
+            "test_llm_parsing": "/test-llm-parsing"
         },
         "environment_variables": {
             "TWILIO_ACCOUNT_SID": bool(os.environ.get("TWILIO_ACCOUNT_SID")),
@@ -178,113 +229,200 @@ async def make_call(call_request: CallRequest, api_key: str = Depends(verify_api
             detail=f"Failed to make call: {str(e)}"
         )
 
-@app.post("/call")
-async def simple_call(phone_number: str, message: str, api_key: str = Depends(verify_api_key_header)):
+# Document parsing endpoints
+@app.post("/parse-document")
+async def parse_document(
+    file: UploadFile = File(...),
+    api_key: str = Depends(verify_api_key_header)
+):
     """
-    Simplified endpoint for external integrations like Cortex.ai.
-    Accepts simple form parameters instead of JSON body.
+    Parse a document with comprehensive structure analysis optimized for LLM processing.
+    
+    This endpoint provides:
+    - Page-by-page content breakdown
+    - Content block classification
+    - Pattern detection for forms, fields, signatures
+    - Text confidence scoring
+    - Processing instructions for LLMs
     
     Args:
-        phone_number: Phone number to call (e.g., "+15551234567") 
-        message: Message to speak during the call
+        file: The document file to parse (PDF or image)
         
     Returns:
-        Simple success response
+        Comprehensive document structure with LLM processing guidance
     """
+    if not document_parser:
+        raise HTTPException(
+            status_code=501,
+            detail="Document parsing not available. Install pypdf to enable this feature."
+        )
+    
+    # Validate file type
+    allowed_extensions = {'.pdf', '.png', '.jpg', '.jpeg', '.tiff', '.bmp'}
+    file_extension = os.path.splitext(file.filename)[1].lower()
+    
+    if file_extension not in allowed_extensions:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unsupported file type: {file_extension}. Supported: {', '.join(allowed_extensions)}"
+        )
+    
     try:
-        # Use the main call function with the verified API key
-        result = await make_call(CallRequest(
-            to_number=phone_number,
-            message=message
-        ), api_key)
+        # Read file content
+        file_content = await file.read()
+        
+        if len(file_content) == 0:
+            raise HTTPException(status_code=400, detail="Empty file uploaded")
+        
+        # Parse document with enhanced parser for LLM
+        result = await document_parser.parse_document_for_llm(
+            file_content=file_content,
+            filename=file.filename
+        )
+        
+        if not result["success"]:
+            raise HTTPException(
+                status_code=500,
+                detail=f"Document parsing failed: {result.get('error', 'Unknown error')}"
+            )
+        
+        return result
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error processing document: {str(e)}"
+        )
+
+@app.get("/document-templates")
+async def get_document_templates(api_key: str = Depends(verify_api_key_header)):
+    """
+    Get available document templates for parsing.
+    
+    Returns:
+        List of available templates and their field definitions
+    """
+    if not document_parser:
+        raise HTTPException(
+            status_code=501,
+            detail="Document parsing not available. Install pypdf to enable this feature."
+        )
+    
+    # Return template info for enhanced parser
+    return {
+        "success": True,
+        "templates": {
+            "enhanced": "LLM-optimized parsing with comprehensive structure analysis"
+        },
+        "supported_field_types": ["name", "address", "phone", "email", "date", "ssn"],
+        "supported_file_types": [".pdf", ".png", ".jpg", ".jpeg", ".tiff", ".bmp"],
+        "parsing_modes": {
+            "enhanced_llm": "Comprehensive document analysis for LLM processing"
+        }
+    }
+
+@app.post("/validate-document-field")
+async def validate_document_field(
+    field_type: str = Form(...),
+    field_value: str = Form(...),
+    api_key: str = Depends(verify_api_key_header)
+):
+    """
+    Validate a single field value against its expected format.
+    
+    Args:
+        field_type: The type of field (ssn, date, email, phone, etc.)
+        field_value: The value to validate
+        
+    Returns:
+        Validation result
+    """
+    if not document_parser:
+        raise HTTPException(
+            status_code=501,
+            detail="Document parsing not available. Install pypdf to enable this feature."
+        )
+    
+    try:
+        # Simple validation patterns
+        patterns = {
+            "ssn": r'^\d{3}-?\d{2}-?\d{4}$',
+            "date": r'^\d{1,2}[/-]\d{1,2}[/-]\d{2,4}$',
+            "email": r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$',
+            "phone": r'^\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}$',
+            "zip": r'^\d{5}(-\d{4})?$',
+            "name": r'^[a-zA-Z\s\'-]{2,}$'
+        }
+        
+        field_type_lower = field_type.lower()
+        pattern = patterns.get(field_type_lower, ".*")
+        
+        # Validate
+        import re
+        is_valid = re.match(pattern, field_value.strip()) is not None
         
         return {
             "success": True,
-            "call_sid": result.call_sid,
-            "message": "Voice call initiated successfully",
-            "phone_number": phone_number
+            "field_type": field_type,
+            "field_value": field_value,
+            "is_valid": is_valid,
+            "pattern": pattern,
+            "validation_message": "Valid format" if is_valid else f"Invalid format for {field_type}"
         }
         
-    except HTTPException as e:
-        return {
-            "success": False,
-            "error": e.detail,
-            "phone_number": phone_number
-        }
+    except HTTPException:
+        raise
     except Exception as e:
-        return {
-            "success": False,
-            "error": f"Unexpected error: {str(e)}",
-            "phone_number": phone_number
-        }
-
-# Advanced endpoints available but commented out pending SMS verification
-"""
-@app.post("/send-sms", response_model=SMSResponse)
-async def send_sms(sms_request: SMSRequest):
-    # SMS functionality available but commented out
-    # Will be enabled once Twilio SMS verification is complete
-    raise HTTPException(
-        status_code=501,
-        detail="SMS functionality temporarily disabled pending Twilio verification"
-    )
-
-@app.post("/send-notification", response_model=NotificationResponse)  
-async def send_notification(notification_request: NotificationRequest):
-    # Unified notification functionality available but commented out
-    # Will be enabled once Twilio SMS verification is complete
-    raise HTTPException(
-        status_code=501,
-        detail="Unified notifications temporarily disabled pending Twilio verification"
-    )
-"""
-
-@app.post("/twiml")
-async def twiml_webhook(message: str):
-    """
-    Webhook endpoint that returns TwiML for custom messages.
-    This can be used as a callback URL for more complex call flows.
-    """
-    if not twilio_service:
-        raise HTTPException(status_code=500, detail="Twilio service not configured")
-    
-    twiml_response = twilio_service.create_twiml_response(message)
-    return Response(content=twiml_response, media_type="application/xml")
-
-# Simple test endpoint for voice calls
-@app.post("/test-call")
-async def test_call(api_key: str = Depends(verify_api_key)):
-    """Test endpoint that makes a simple call to a predefined number."""
-    test_number = os.environ.get("PHONE_NUMBER")
-    if not test_number:
         raise HTTPException(
-            status_code=400,
-            detail="PHONE_NUMBER environment variable not set"
+            status_code=500,
+            detail=f"Validation error: {str(e)}"
+        )
+
+# Test endpoint for LLM parsing
+@app.post("/test-llm-parsing")
+async def test_llm_parsing(api_key: str = Depends(verify_api_key_header)):
+    """
+    Test the enhanced LLM document parsing with a sample document.
+    This endpoint will attempt to parse your sample PDF for testing.
+    """
+    if not document_parser:
+        raise HTTPException(
+            status_code=501,
+            detail="Enhanced document parsing not available."
         )
     
-    return await make_call(CallRequest(
-        to_number=test_number,
-        message="This is a test call from your DocAlert system. If you can hear this message, the voice call system is working correctly."
-    ), api_key)
-
-# Advanced test endpoints available but commented out
-"""
-@app.post("/test-sms")
-async def test_sms():
-    # SMS test endpoint - will be enabled once verification is complete
-    raise HTTPException(
-        status_code=501,
-        detail="SMS test temporarily disabled pending Twilio verification"
-    )
-
-@app.post("/test-notification")
-async def test_notification():
-    # Unified notification test - will be enabled once verification is complete
-    raise HTTPException(
-        status_code=501,
-        detail="Notification test temporarily disabled pending Twilio verification"
-    )
-"""
+    # Check if the test document exists
+    test_doc_path = "testing_doc/invalid_fw4.pdf"
+    if not os.path.exists(test_doc_path):
+        raise HTTPException(
+            status_code=404,
+            detail=f"Test document not found: {test_doc_path}. Please ensure the file exists in the backend directory."
+        )
+    
+    try:
+        # Read the test document
+        with open(test_doc_path, 'rb') as f:
+            file_content = f.read()
+        
+        # Parse with enhanced parser
+        result = await document_parser.parse_document_for_llm(
+            file_content=file_content,
+            filename=test_doc_path
+        )
+        
+        return {
+            "test_status": "success",
+            "message": "Enhanced LLM parsing test completed",
+            "parsing_result": result
+        }
+        
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Test parsing failed: {str(e)}"
+        )
 
 if __name__ == "__main__":
     import uvicorn
