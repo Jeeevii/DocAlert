@@ -7,6 +7,7 @@ from typing import Optional, Literal, Annotated, List
 import os
 from dotenv import load_dotenv
 from twilio_speech import TwilioSpeechService
+import uvicorn
 
 # Advanced features available but commented out
 # from twilio_sms import TwilioSMSService  
@@ -425,5 +426,5 @@ async def test_llm_parsing(api_key: str = Depends(verify_api_key_header)):
         )
 
 if __name__ == "__main__":
-    import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000, reload=True)
+    port = int(os.environ.get("PORT", 8000))  # default to 8000 if not set
+    uvicorn.run("server:app", host="0.0.0.0", port=port, reload=True)
