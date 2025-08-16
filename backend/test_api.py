@@ -1,6 +1,6 @@
 """
-DocAlert API Test Script - Simple Voice Calls
-This script demonstrates basic voice call functionality.
+DocAlert API Test Script - Simple Voice Calls with CORS
+This script demonstrates basic voice call functionality and CORS support.
 """
 
 import requests
@@ -20,8 +20,28 @@ def test_health_check():
         print(f"Health check failed: {e}")
         return False
 
+def make_simple_call(phone_number: str, message: str):
+    """Test the simplified call endpoint (good for Cortex.ai integration)."""
+    try:
+        # Test form data (like Cortex.ai would send)
+        response = requests.post(
+            f"{BASE_URL}/call", 
+            data={
+                "phone_number": phone_number,
+                "message": message
+            }
+        )
+        
+        print(f"Simple Call Response (Status: {response.status_code}):")
+        print(json.dumps(response.json(), indent=2))
+        
+        return response.status_code == 200
+    except Exception as e:
+        print(f"Simple call request failed: {e}")
+        return False
+
 def make_test_call(phone_number: str, message: str):
-    """Make a simple test call using the API."""
+    """Make a test call using the JSON API."""
     try:
         payload = {
             "to_number": phone_number,
@@ -30,12 +50,12 @@ def make_test_call(phone_number: str, message: str):
         
         response = requests.post(f"{BASE_URL}/make-call", json=payload)
         
-        print(f"Call Request Response (Status: {response.status_code}):")
+        print(f"JSON Call Response (Status: {response.status_code}):")
         print(json.dumps(response.json(), indent=2))
         
         return response.status_code == 200
     except Exception as e:
-        print(f"Call request failed: {e}")
+        print(f"JSON call request failed: {e}")
         return False
 
 def make_predefined_test_call():
@@ -52,7 +72,7 @@ def make_predefined_test_call():
         return False
 
 if __name__ == "__main__":
-    print("=== DocAlert Voice Call Test ===\n")
+    print("=== DocAlert Voice Call Test with CORS ===\n")
     
     # Test health check
     print("1. Testing health check...")
@@ -69,8 +89,8 @@ if __name__ == "__main__":
     else:
         print("❌ Test call failed\n")
     
-    # Test custom call
-    print("3. Testing custom call...")
+    # Test custom calls
+    print("3. Testing custom calls...")
     phone_number = input("Enter phone number for custom call (e.g., +15551234567) or press Enter to skip: ").strip()
     
     if phone_number:
@@ -78,16 +98,26 @@ if __name__ == "__main__":
         if not message:
             message = "Hello! This is a custom test call from your DocAlert system."
         
-        if make_test_call(phone_number, message):
-            print("✅ Custom call initiated successfully")
+        print("\n--- Simple Call Test (Cortex.ai style) ---")
+        if make_simple_call(phone_number, message):
+            print("✅ Simple call initiated successfully")
         else:
-            print("❌ Custom call failed")
+            print("❌ Simple call failed")
+        
+        print("\n--- JSON Call Test ---")
+        if make_test_call(phone_number, message):
+            print("✅ JSON call initiated successfully")
+        else:
+            print("❌ JSON call failed")
     else:
-        print("Skipping custom call test")
+        print("Skipping custom call tests")
     
     print("\n=== Test Complete ===")
     print(f"🌐 API Documentation: {BASE_URL}/docs")
     print(f"🏥 API Health: {BASE_URL}/health")
     print(f"📞 Feature: Simple voice calls")
-    print(f"� Note: Advanced features (SMS, voicemail) are available but commented out")
-    print(f"� They will be enabled once Twilio verification is complete")
+    print(f"🔗 CORS: Enabled for external integrations")
+    print(f"🤖 Cortex.ai: Use POST {BASE_URL}/call with form data")
+    print(f"📚 Integration Guide: See CORTEX_INTEGRATION.md")
+    print(f"💡 Note: Advanced features (SMS, voicemail) are available but commented out")
+    print(f"💡 They will be enabled once Twilio verification is complete")

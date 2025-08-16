@@ -9,7 +9,7 @@ import time
 
 # Configuration
 API_BASE = "http://127.0.0.1:8000"
-PHONE_NUMBER = "+15551234567"  # Replace with your phone number
+PHONE_NUMBER = "+15102586918"  # Replace with your phone number
 
 class DocAlertClient:
     """Simple client for DocAlert API."""

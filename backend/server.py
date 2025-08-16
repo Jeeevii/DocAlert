@@ -1,5 +1,6 @@
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import Response
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 from typing import Optional, Literal
 import os
@@ -18,6 +19,15 @@ app = FastAPI(
     title="DocAlert API",
     description="API for sending voice alerts using Twilio",
     version="1.0.0"
+)
+
+# Add CORS middleware
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # Allows all origins
+    allow_credentials=True,
+    allow_methods=["*"],  # Allows all methods
+    allow_headers=["*"],  # Allows all headers
 )
 
 # Initialize Twilio service
@@ -67,18 +77,32 @@ class NotificationResponse(BaseModel):
 @app.get("/")
 async def root():
     """Health check endpoint."""
-    return {"message": "DocAlert API is running"}
+    return {
+        "message": "DocAlert API is running",
+        "status": "healthy",
+        "version": "1.0.0",
+        "cors_enabled": True
+    }
 
 @app.get("/health")
 async def health_check():
     """Detailed health check with service status."""
     return {
         "status": "healthy",
+        "service": "DocAlert API",
+        "version": "1.0.0",
         "twilio_configured": twilio_service is not None,
+        "cors_enabled": True,
+        "endpoints": {
+            "voice_calls": "/make-call",
+            "test_call": "/test-call",
+            "webhook": "/twiml"
+        },
         "environment_variables": {
             "TWILIO_ACCOUNT_SID": bool(os.environ.get("TWILIO_ACCOUNT_SID")),
             "TWILIO_AUTH_TOKEN": bool(os.environ.get("TWILIO_AUTH_TOKEN")),
-            "TWILIO_FROM_NUMBER": bool(os.environ.get("TWILIO_FROM_NUMBER"))
+            "TWILIO_FROM_NUMBER": bool(os.environ.get("TWILIO_FROM_NUMBER")),
+            "PHONE_NUMBER": bool(os.environ.get("PHONE_NUMBER"))
         }
     }
 
@@ -125,6 +149,46 @@ async def make_call(call_request: CallRequest):
             status_code=500,
             detail=f"Failed to make call: {str(e)}"
         )
+
+@app.post("/call")
+async def simple_call(phone_number: str, message: str):
+    """
+    Simplified endpoint for external integrations like Cortex.ai.
+    Accepts simple form parameters instead of JSON body.
+    
+    Args:
+        phone_number: Phone number to call (e.g., "+15551234567") 
+        message: Message to speak during the call
+        
+    Returns:
+        Simple success response
+    """
+    try:
+        # Use the main call function
+        result = await make_call(CallRequest(
+            to_number=phone_number,
+            message=message
+        ))
+        
+        return {
+            "success": True,
+            "call_sid": result.call_sid,
+            "message": "Voice call initiated successfully",
+            "phone_number": phone_number
+        }
+        
+    except HTTPException as e:
+        return {
+            "success": False,
+            "error": e.detail,
+            "phone_number": phone_number
+        }
+    except Exception as e:
+        return {
+            "success": False,
+            "error": f"Unexpected error: {str(e)}",
+            "phone_number": phone_number
+        }
 
 # Advanced endpoints available but commented out pending SMS verification
 """
