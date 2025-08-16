@@ -1,10 +1,19 @@
 # DocAlert + Cortex.ai Integration Guide
 
-This guide shows how to integrate DocAlert with Cortex.ai using HTTP requests.
+This guide shows how to integrate DocAlert with Cortex.ai using HTTP requests with API key authentication.
+
+## 🔐 Authentication
+
+DocAlert now requires API key authentication for all protected endpoints. 
+
+### Get Your API Key
+1. Run `python generate_api_key.py` in the backend folder
+2. Copy the generated API key from `.env` file
+3. Use it in the `X-API-Key` header
 
 ## Server Setup
 
-The DocAlert server now includes CORS support and simplified endpoints for external integrations.
+The DocAlert server now includes CORS support, API key authentication, and simplified endpoints for external integrations.
 
 ### CORS Configuration
 - ✅ **Allow Origins**: `*` (all origins)
@@ -12,9 +21,14 @@ The DocAlert server now includes CORS support and simplified endpoints for exter
 - ✅ **Allow Headers**: `*` (all headers)
 - ✅ **Allow Credentials**: `true`
 
+### Security Configuration
+- ✅ **API Key Authentication**: Required for all protected endpoints
+- ✅ **Bearer Token Support**: Authorization header format
+- ✅ **Custom Header Support**: X-API-Key header format
+
 ## Available Endpoints for Cortex.ai
 
-### 1. Health Check
+### 1. Health Check (No Auth Required)
 ```
 GET http://127.0.0.1:8000/health
 ```
@@ -38,6 +52,7 @@ GET http://127.0.0.1:8000/health
 ```
 POST http://127.0.0.1:8000/call
 Content-Type: application/x-www-form-urlencoded
+X-API-Key: your_api_key_here
 
 phone_number=+15551234567&message=Hello from Cortex.ai!
 ```
@@ -151,6 +166,7 @@ Both endpoints return consistent error responses:
 ```bash
 curl -X POST "http://127.0.0.1:8000/call" \
      -H "Content-Type: application/x-www-form-urlencoded" \
+     -H "X-API-Key: your_api_key_here" \
      -d "phone_number=+15551234567&message=Test from cURL"
 ```
 
@@ -163,6 +179,9 @@ response = requests.post(
     data={
         "phone_number": "+15551234567",
         "message": "Test from Python"
+    },
+    headers={
+        "X-API-Key": "your_api_key_here"
     }
 )
 

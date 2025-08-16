@@ -1,13 +1,30 @@
 """
-DocAlert API Test Script - Simple Voice Calls with CORS
-This script demonstrates basic voice call functionality and CORS support.
+DocAlert API Test Script - Simple Voice Calls with CORS and API Key Authentication
+This script demonstrates basic voice call functionality, CORS support, and API key usage.
 """
 
 import requests
 import json
+import os
+from dotenv import load_dotenv
 
-# API base URL
+# Load environment variables
+load_dotenv()
+
+# API base URL and authentication
 BASE_URL = "http://127.0.0.1:8000"
+API_KEY = os.getenv("DOCALERT_API_KEY")
+
+if not API_KEY:
+    print("❌ Error: DOCALERT_API_KEY not found in .env file")
+    print("Run 'python generate_api_key.py' to generate one")
+    exit(1)
+
+# Headers for API authentication
+HEADERS = {
+    "X-API-Key": API_KEY,
+    "Content-Type": "application/json"
+}
 
 def test_health_check():
     """Test the health check endpoint."""
@@ -23,13 +40,14 @@ def test_health_check():
 def make_simple_call(phone_number: str, message: str):
     """Test the simplified call endpoint (good for Cortex.ai integration)."""
     try:
-        # Test form data (like Cortex.ai would send)
+        # Test form data (like Cortex.ai would send) with API key header
         response = requests.post(
             f"{BASE_URL}/call", 
             data={
                 "phone_number": phone_number,
                 "message": message
-            }
+            },
+            headers={"X-API-Key": API_KEY}
         )
         
         print(f"Simple Call Response (Status: {response.status_code}):")
@@ -48,7 +66,7 @@ def make_test_call(phone_number: str, message: str):
             "message": message
         }
         
-        response = requests.post(f"{BASE_URL}/make-call", json=payload)
+        response = requests.post(f"{BASE_URL}/make-call", json=payload, headers=HEADERS)
         
         print(f"JSON Call Response (Status: {response.status_code}):")
         print(json.dumps(response.json(), indent=2))
@@ -61,7 +79,7 @@ def make_test_call(phone_number: str, message: str):
 def make_predefined_test_call():
     """Make a call using the test endpoint."""
     try:
-        response = requests.post(f"{BASE_URL}/test-call")
+        response = requests.post(f"{BASE_URL}/test-call", headers=HEADERS)
         
         print(f"Test Call Response (Status: {response.status_code}):")
         print(json.dumps(response.json(), indent=2))
@@ -115,9 +133,10 @@ if __name__ == "__main__":
     print("\n=== Test Complete ===")
     print(f"🌐 API Documentation: {BASE_URL}/docs")
     print(f"🏥 API Health: {BASE_URL}/health")
-    print(f"📞 Feature: Simple voice calls")
+    print(f"📞 Feature: Simple voice calls with API key authentication")
     print(f"🔗 CORS: Enabled for external integrations")
-    print(f"🤖 Cortex.ai: Use POST {BASE_URL}/call with form data")
+    print(f"🔑 API Key: {API_KEY}")
+    print(f"🤖 Cortex.ai: Use POST {BASE_URL}/call with X-API-Key header")
     print(f"📚 Integration Guide: See CORTEX_INTEGRATION.md")
     print(f"💡 Note: Advanced features (SMS, voicemail) are available but commented out")
     print(f"💡 They will be enabled once Twilio verification is complete")

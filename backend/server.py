@@ -1,8 +1,9 @@
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Depends, Header
 from fastapi.responses import Response
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel, Field
-from typing import Optional, Literal
+from typing import Optional, Literal, Annotated
 import os
 from dotenv import load_dotenv
 from twilio_speech import TwilioSpeechService
@@ -13,6 +14,33 @@ from twilio_speech import TwilioSpeechService
 
 # Load environment variables
 load_dotenv()
+
+# API Key configuration
+API_KEY = os.getenv("DOCALERT_API_KEY")
+if not API_KEY:
+    raise ValueError("DOCALERT_API_KEY environment variable is required")
+
+# Security scheme
+security = HTTPBearer()
+
+def verify_api_key(credentials: HTTPAuthorizationCredentials = Depends(security)) -> str:
+    """Verify the API key from the Authorization header."""
+    if credentials.credentials != API_KEY:
+        raise HTTPException(
+            status_code=401,
+            detail="Invalid API key",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    return credentials.credentials
+
+def verify_api_key_header(x_api_key: Annotated[str | None, Header()] = None) -> str:
+    """Alternative API key verification via X-API-Key header."""
+    if x_api_key != API_KEY:
+        raise HTTPException(
+            status_code=401,
+            detail="Invalid API key. Please provide a valid API key in X-API-Key header.",
+        )
+    return x_api_key
 
 # Initialize FastAPI app
 app = FastAPI(
@@ -107,7 +135,7 @@ async def health_check():
     }
 
 @app.post("/make-call", response_model=CallResponse)
-async def make_call(call_request: CallRequest):
+async def make_call(call_request: CallRequest, api_key: str = Depends(verify_api_key_header)):
     """
     Make a simple phone call with a custom message.
     
@@ -151,7 +179,7 @@ async def make_call(call_request: CallRequest):
         )
 
 @app.post("/call")
-async def simple_call(phone_number: str, message: str):
+async def simple_call(phone_number: str, message: str, api_key: str = Depends(verify_api_key_header)):
     """
     Simplified endpoint for external integrations like Cortex.ai.
     Accepts simple form parameters instead of JSON body.
@@ -164,11 +192,11 @@ async def simple_call(phone_number: str, message: str):
         Simple success response
     """
     try:
-        # Use the main call function
+        # Use the main call function with the verified API key
         result = await make_call(CallRequest(
             to_number=phone_number,
             message=message
-        ))
+        ), api_key)
         
         return {
             "success": True,
@@ -225,7 +253,7 @@ async def twiml_webhook(message: str):
 
 # Simple test endpoint for voice calls
 @app.post("/test-call")
-async def test_call():
+async def test_call(api_key: str = Depends(verify_api_key)):
     """Test endpoint that makes a simple call to a predefined number."""
     test_number = os.environ.get("PHONE_NUMBER")
     if not test_number:
@@ -237,7 +265,7 @@ async def test_call():
     return await make_call(CallRequest(
         to_number=test_number,
         message="This is a test call from your DocAlert system. If you can hear this message, the voice call system is working correctly."
-    ))
+    ), api_key)
 
 # Advanced test endpoints available but commented out
 """

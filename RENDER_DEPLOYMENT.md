@@ -36,7 +36,10 @@ Add these in Render's Environment tab:
 TWILIO_ACCOUNT_SID=your_account_sid_here
 TWILIO_AUTH_TOKEN=your_auth_token_here
 TWILIO_PHONE_NUMBER=your_twilio_phone_number
+DOCALERT_API_KEY=your_generated_api_key_here
 ```
+
+**⚠️ Important**: Use the API key generated from `python generate_api_key.py`
 
 ### Step 4: Deploy
 - Click "Create Web Service"
@@ -65,8 +68,9 @@ TWILIO_PHONE_NUMBER=your_twilio_phone_number
 # Health check
 curl https://your-app.onrender.com/health
 
-# Make a call (replace with your URL)
+# Make a call (replace with your URL and API key)
 curl -X POST https://your-app.onrender.com/call \
+  -H "X-API-Key: your_api_key_here" \
   -d "phone_number=+15551234567" \
   -d "message=Hello from DocAlert!"
 ```
@@ -101,6 +105,7 @@ Once deployed, use your Render URL in Cortex.ai:
 ```
 Endpoint: https://your-app.onrender.com/call
 Method: POST (Form Data)
+Headers: X-API-Key: your_api_key_here
 Fields: phone_number, message
 ```
 
