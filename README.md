@@ -1,8 +1,8 @@
-# DocAlert Document Parsing Setup Guide
+# Parserate Document Parsing Setup Guide
 
 ## 🔍 Overview
 
-The DocAlert document parsing feature uses Docling to extract and validate structured data from documents like PDFs, images, and forms. This helps automate HR document processing and reduces manual data entry errors.
+The Parserate document parsing feature uses Docling to extract and validate structured data from documents like PDFs, images, and forms. This helps automate HR document processing and reduces manual data entry errors.
 
 ## 📋 What It Does
 
